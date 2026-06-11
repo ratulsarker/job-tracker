@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Search Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .fade-in { animation: fadeIn 0.35s ease-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .tab-btn { cursor: pointer; padding: 0.5rem 1rem; font-size: 0.8rem; font-weight: 600; border-bottom: 2px solid transparent; color: #6b7280; transition: all 0.2s; white-space: nowrap; }
+    .tab-btn:hover { color: #111827; }
+    .tab-btn.active { color: #111827; border-bottom-color: #111827; }
+    select:focus, input:focus { box-shadow: 0 0 0 3px rgba(59,130,246,0.25); }
+    .job-card { transition: box-shadow 0.2s, transform 0.15s; }
+    .job-card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.08); transform: translateY(-1px); }
+    .status-not_applied { background:#f3f4f6; color:#374151; }
+    .status-expired { background:#fef3c7; color:#92400e; }
+    .status-saved { background:#e0e7ff; color:#3730a3; }
+    .status-not_interested { background:#f3f4f6; color:#6b7280; }
+    .status-withdrawn { background:#f5f5f4; color:#78716c; }
+    .status-applied { background:#dbeafe; color:#1d4ed8; }
+    .status-interview { background:#fef3c7; color:#92400e; }
+    .status-offer { background:#d1fae5; color:#065f46; }
+    .status-rejected { background:#fee2e2; color:#991b1b; }
+    .tier-1 { background:#fdf2f8; color:#9d174d; border: 1px solid #fbcfe8; }
+    .tier-2 { background:#eff6ff; color:#1e40af; border: 1px solid #bfdbfe; }
+    .tier-3 { background:#f0fdf4; color:#166534; border: 1px solid #bbf7d0; }
+    .tier-4 { background:#fff7ed; color:#9a3412; border: 1px solid #fed7aa; }
+    .priority-high::before { content:''; display:inline-block; width:8px; height:8px; border-radius:50%; background:#ef4444; margin-right:5px; }
+    .priority-medium::before { content:''; display:inline-block; width:8px; height:8px; border-radius:50%; background:#f59e0b; margin-right:5px; }
+    .priority-low::before { content:''; display:inline-block; width:8px; height:8px; border-radius:50%; background:#10b981; margin-right:5px; }
+    .modal-overlay { background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f5f9; }
+    ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .notes-input { resize: none; min-height: 2.5rem; transition: min-height 0.2s; }
+    .notes-input:focus { min-height: 4rem; }
+    .skeleton { background: linear-gradient(90deg, #f3f4f6 25%, #e5e7eb 37%, #f3f4f6 63%); background-size: 400% 100%; animation: shimmer 1.2s ease infinite; }
+    @keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- ===== LOGIN SCREEN ===== -->
+<div id="login-screen" class="min-h-screen flex items-center justify-center px-4">
+  <div class="bg-white rounded-2xl border border-gray-200 shadow-xl p-10 w-full max-w-sm text-center">
+    <div class="w-16 h-16 mx-auto mb-6 rounded-full bg-gray-900 flex items-center justify-center">
+      <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+      </svg>
+    </div>
+    <h1 class="text-xl font-bold text-gray-900 mb-1">Job Search Dashboard</h1>
+    <p class="text-sm text-gray-400 mb-6">Ratul Sarker · Toronto 2026</p>
+    <input type="password" id="login-password" placeholder="Access code"
+      class="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm text-center focus:outline-none focus:border-gray-900 mb-3"
+      onkeydown="if(event.key==='Enter') doLogin()">
+    <button onclick="doLogin()" class="w-full bg-gray-900 hover:bg-gray-800 text-white font-semibold py-3 rounded-lg transition-all">
+      Enter →
+    </button>
+    <p id="login-error" class="text-red-500 text-sm mt-3 hidden">Invalid access code</p>
+  </div>
+</div>
+
+<!-- ===== MAIN APP ===== -->
+<div id="main-app" class="hidden">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+      <div>
+        <h1 class="text-xl sm:text-2xl font-bold text-gray-900">Job Search Dashboard</h1>
+        <p class="text-xs text-gray-400 mt-0.5">Ratul Sarker · MMA 2026 · Toronto</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <!-- Stats pills -->
+        <div class="hidden sm:flex items-center gap-2">
+          <div class="bg-gray-100 rounded-full px-3 py-1 text-xs font-semibold text-gray-700">
+            <span id="stat-total">0</span> jobs
+          </div>
+          <div class="bg-blue-50 rounded-full px-3 py-1 text-xs font-semibold text-blue-700">
+            <span id="stat-applied">0</span> applied
+          </div>
+          <div class="bg-yellow-50 rounded-full px-3 py-1 text-xs font-semibold text-yellow-700">
+            <span id="stat-interviews">0</span> interviews
+          </div>
+          <div class="bg-green-50 rounded-full px-3 py-1 text-xs font-semibold text-green-700">
+            <span id="stat-offers">0</span> offers
+          </div>
+        </div>
+        <button onclick="openAddModal()" class="bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          <span class="hidden sm:inline">Add Job</span>
+        </button>
+        <button onclick="logout()" class="text-xs text-gray-400 hover:text-red-500 transition-colors">Logout</button>
+      </div>
+    </div>
+
+    <!-- Mobile stats -->
+    <div class="sm:hidden px-4 pb-3 flex gap-2 overflow-x-auto">
+      <div class="bg-gray-100 rounded-full px-3 py-1 text-xs font-semibold text-gray-700 whitespace-nowrap"><span id="stat-total-m">0</span> total</div>
+      <div class="bg-blue-50 rounded-full px-3 py-1 text-xs font-semibold text-blue-700 whitespace-nowrap"><span id="stat-applied-m">0</span> applied</div>
+      <div class="bg-yellow-50 rounded-full px-3 py-1 text-xs font-semibold text-yellow-700 whitespace-nowrap"><span id="stat-interviews-m">0</span> interviews</div>
+      <div class="bg-green-50 rounded-full px-3 py-1 text-xs font-semibold text-green-700 whitespace-nowrap"><span id="stat-offers-m">0</span> offers</div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 flex gap-0 -mb-px overflow-x-auto">
+      <div class="tab-btn active" onclick="setTab('all')" id="tab-all">All</div>
+      <div class="tab-btn" onclick="setTab('automation')" id="tab-automation">⚡ Automation</div>
+      <div class="tab-btn" onclick="setTab('bestmatch')" id="tab-bestmatch">🎯 Best Match</div>
+      <div class="tab-btn" onclick="setTab('earlycareers')" id="tab-earlycareers">🌱 Early Careers</div>
+      <div class="tab-btn" onclick="setTab('cfa')" id="tab-cfa">📜 CFA Path</div>
+      <div class="tab-btn" onclick="setTab('fallfinance')" id="tab-fallfinance">💼 Fall Finance</div>
+      <div class="tab-btn" onclick="setTab('micromature')" id="tab-micromature">🧬 Micro Mature</div>
+      <div class="tab-btn" onclick="setTab('applied')" id="tab-applied">Applied</div>
+      <div class="tab-btn" onclick="setTab('interviews')" id="tab-interviews">Interviews</div>
+    </div>
+  </header>
+
+  <!-- Filters bar -->
+  <div class="bg-white border-b border-gray-100 sticky top-[104px] sm:top-[88px] z-20">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap gap-2 items-center">
+      <div class="relative flex-1 min-w-[160px] max-w-xs">
+        <svg class="absolute left-3 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <input type="text" id="search-box" placeholder="Search company or role…"
+          class="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-gray-900"
+          >
+      </div>
+      <select id="cat-filter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white" >
+        <option value="">All Categories</option>
+        <option>Private Equity</option>
+        <option>Investment Banking</option>
+        <option>Venture Capital</option>
+        <option>Consulting</option>
+        <option>Data Analytics</option>
+        <option>FP&amp;A</option>
+        <option>Risk</option>
+        <option>Revenue Operations</option>
+        <option>Corporate Development</option>
+        <option>Business Operations</option>
+        <option>Fintech</option>
+        <option>Automation</option>
+        <option>Startup</option>
+        <option>Job Board</option>
+      </select>
+      <select id="status-filter" class="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white" >
+        <option value="">All Statuses</option>
+        <option value="not_applied">Not Applied</option>
+        <option value="applied">Applied</option>
+        <option value="interview">Interview</option>
+        <option value="offer">Offer</option>
+        <option value="rejected">Rejected</option>
+        <option value="expired">Expired</option>
+        <option value="saved">Saved</option>
+        <option value="not_interested">Not Interested</option>
+        <option value="withdrawn">Withdrawn</option>
+      </select>
+      <select id="sort-by" class="rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:border-gray-900 bg-white" >
+        <option value="date_added">Sort: Date Added</option>
+        <option value="priority">Sort: Priority</option>
+        <option value="company">Sort: Company</option>
+      </select>
+      <div id="result-count" class="text-xs text-gray-400 ml-auto"></div>
+    </div>
+  </div>
+
+  <!-- Job list -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+    <div id="jobs-list" class="space-y-3 fade-in"></div>
+    <div id="load-more-wrap" class="hidden text-center pt-4">
+      <button id="load-more-btn" onclick="loadMoreJobs()" class="inline-flex items-center gap-2 bg-white border border-gray-200 hover:border-gray-300 text-gray-700 text-sm font-semibold px-4 py-2 rounded-lg transition-all">
+        Load more
+      </button>
+    </div>
+    <div id="jobs-empty" class="hidden text-center py-20 text-gray-400">
+      <svg class="w-12 h-12 mx-auto mb-3 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+      <p class="font-medium">No jobs found</p>
+      <p class="text-sm mt-1">Try adjusting your filters or <button onclick="openAddModal()" class="text-blue-600 hover:underline">add a new job</button></p>
+    </div>
+    <div id="jobs-loading" class="text-center py-20 text-gray-400">
+      <div class="inline-block w-8 h-8 border-4 border-gray-200 border-t-gray-600 rounded-full animate-spin mb-3"></div>
+      <p class="text-sm">Loading jobs…</p>
+    </div>
+  </main>
+</div>
+
+<!-- ===== ADD JOB MODAL ===== -->
+<div id="add-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay" onclick="if(event.target===this)closeAddModal()">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+    <div class="p-6 border-b border-gray-100 flex items-center justify-between">
+      <h2 class="text-lg font-bold text-gray-900">Add New Job</h2>
+      <button onclick="closeAddModal()" class="text-gray-400 hover:text-gray-700 rounded-lg p-1">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="p-6 space-y-4">
+      <div class="grid grid-cols-2 gap-3">
+        <div class="col-span-2">
+          <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Company *</label>
+          <input id="add-company" type="text" placeholder="e.g. Goldman Sachs" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:border-gray-900">
+        </div>
+        <div class="col-span-2">
+          <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Role *</label>
+          <input id="add-role" type="text" placeholder="e.g. Investment Banking Analyst" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:border-gray-900">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Legacy Tier</label>
+          <select id="add-tier" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:border-gray-900 bg-white">
+            <option value="4" selected>Not used in main UI</option>
+            <option value="1">Legacy 1</option>
+            <option value="2">Legacy 2</option>
+            <option value="3">Legacy 3</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Category</label>
+          <select id="add-category" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:border-gray-900 bg-white">
+            <option>Private Equity</option>
+            <option>Investment Banking</option>
+            <option>Venture Capital</option>
+            <option>Consulting</option>
+            <option>Data Analytics</option>
+            <option>FP&A</option>
+            <option>Risk</option>
+            <option>Revenue Operations</option>
+            <option>Corporate Development</option>
+            <option>Business Operations</option>
+            <option>Fintech</option>
+            <option>Automation</option>
+            <option>Startup</option>
+            <option>Job Board</option>
+          </select>
+        </div>
+        <div class="col-span-2">
+          <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Application URL</label>
+          <input id="add-url" type="url" placeholder="https://..." class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:border-gray-900">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Salary Range</label>
+          <input id="add-salary" type="text" placeholder="$80-100k" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:border-gray-900">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Location</label>
+          <input id="add-location" type="text" placeholder="Toronto" value="Toronto" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:border-gray-900">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Priority</label>
+          <select id="add-priority" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:border-gray-900 bg-white">
+            <option value="high">High</option>
+            <option value="medium" selected>Medium</option>
+            <option value="low">Low</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Deadline</label>
+          <input id="add-deadline" type="date" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:border-gray-900">
+        </div>
+        <div class="col-span-2">
+          <label class="block text-xs font-semibold text-gray-500 mb-1.5 uppercase tracking-wide">Notes</label>
+          <textarea id="add-notes" rows="2" placeholder="Any notes…" class="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:outline-none focus:border-gray-900 resize-none"></textarea>
+        </div>
+      </div>
+      <p id="add-error" class="text-red-500 text-sm hidden"></p>
+    </div>
+    <div class="p-6 pt-0 flex gap-3">
+      <button onclick="closeAddModal()" class="flex-1 rounded-lg border border-gray-200 px-4 py-2.5 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-all">Cancel</button>
+      <button onclick="submitAddJob()" class="flex-1 bg-gray-900 hover:bg-gray-800 text-white rounded-lg px-4 py-2.5 text-sm font-semibold transition-all" id="add-submit-btn">
+        Add Job
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let token = sessionStorage.getItem('jt_token') || '';
+  let allJobs = [];
+  let jobsMeta = { total: 0, active: 0, archived: 0, counts: {} };
+  let activeTab = 'all';
+  let currentPage = 1;
+  let pageSize = 40;
+  let hasMore = false;
+  let totalFiltered = 0;
+  let loading = false;
+  const detailCache = {};
+  let searchTimer = null;
+  let categoryList = [];
+
+  const RESUME_MAP = {
+    'Private Equity': 'PE', 'private_equity': 'PE',
+    'Investment Banking': 'PE', 'investment_banking': 'PE',
+    'Venture Capital': 'PE', 'Corporate Development': 'PE', 'corporate_development': 'PE',
+    'Asset Management': 'Wealth', 'Wealth Management': 'Wealth', 'Fund Administration': 'Wealth',
+    'Asset & Wealth Mgmt': 'Wealth', 'Pensions / Investments': 'PE',
+    'Risk': 'Risk Analytics', 'Risk Analytics': 'Risk Analytics', 'Credit Risk': 'Risk Analytics',
+    'FP&A': 'FPA', 'FP&A / Finance': 'FPA', 'FP&A / Corporate Finance': 'FPA', 'fpa': 'FPA',
+    'Finance': 'FPA', 'Finance / Analytics': 'FPA', 'Finance Operations': 'FPA', 'Commercial Finance': 'FPA',
+    'Banking & Lending': 'FPA', 'Real Estate': 'FPA', 'Private Equity / Accounting': 'FPA',
+    'Analytics': 'Data Analyst', 'Data Analytics': 'Data Analyst', 'Data & Analytics': 'Data Analyst', 'Business Intelligence': 'Data Analyst',
+    'Consulting': 'Consulting', 'Business Operations': 'Consulting', 'Business Ops': 'Consulting', 'Strategy': 'Consulting',
+    'Fintech': 'Fintech', 'Startup': 'Fintech', 'Fintech & Startups': 'Fintech',
+    'Automation': 'Integrations', 'Revenue Operations': 'Integrations', 'Ops & Automation': 'Integrations', 'CRM / RevOps': 'Integrations',
+    'Job Board': 'General', 'Other': 'General'
+  };
+
+  const RESUME_COLORS = {
+    'PE': 'bg-pink-100 text-pink-700',
+    'Wealth': 'bg-purple-100 text-purple-700',
+    'FPA': 'bg-amber-100 text-amber-700',
+    'Risk Analytics': 'bg-red-100 text-red-700',
+    'Data Analyst': 'bg-cyan-100 text-cyan-700',
+    'Consulting': 'bg-indigo-100 text-indigo-700',
+    'Fintech': 'bg-emerald-100 text-emerald-700',
+    'Integrations': 'bg-orange-100 text-orange-700',
+    'Software': 'bg-slate-100 text-slate-700',
+    'General': 'bg-gray-100 text-gray-600',
+  };
+
+  const FIRM_LABEL_COLORS = {
+    'Top Tier': 'bg-gray-900 text-white',
+    'Large Firm': 'bg-blue-100 text-blue-700',
+    'Institutional': 'bg-violet-100 text-violet-700',
+    'Boutique': 'bg-emerald-100 text-emerald-700',
+    'Finance Firm': 'bg-amber-100 text-amber-700',
+    'Other': 'bg-gray-100 text-gray-600',
+  };
+
+  function getResumeTag(category) { return RESUME_MAP[category] || 'General'; }
+  function getResumeColor(tag) { return RESUME_COLORS[tag] || 'bg-gray-100 text-gray-600'; }
+  function getFirmLabelColor(label) { return FIRM_LABEL_COLORS[label] || 'bg-gray-100 text-gray-600'; }
+
+  async function doLogin() {
+    const pw = document.getElementById('login-password').value;
+    const err = document.getElementById('login-error');
+    err.classList.add('hidden');
+    try {
+      const res = await fetch(`/api/auth?password=${encodeURIComponent(pw)}`);
+      const data = await res.json();
+      if (res.ok && data.token) {
+        token = data.token;
+        sessionStorage.setItem('jt_token', token);
+        showApp();
+      } else {
+        err.classList.remove('hidden');
+      }
+    } catch (e) {
+      err.textContent = 'Connection error. Try again.';
+      err.classList.remove('hidden');
+    }
+  }
+
+  function logout() {
+    sessionStorage.removeItem('jt_token');
+    token = '';
+    document.getElementById('main-app').classList.add('hidden');
+    document.getElementById('login-screen').classList.remove('hidden');
+    document.getElementById('login-password').value = '';
+  }
+
+  function showApp() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('main-app').classList.remove('hidden');
+    loadJobs(true);
+  }
+
+  function populateCategoryOptions() {
+    const cats = Object.keys(jobsMeta.categories || {});
+    if (!cats.length) return;
+    const changed = JSON.stringify(cats) !== JSON.stringify(categoryList);
+    if (!changed) return;
+    categoryList = cats;
+    const currentFilter = document.getElementById('cat-filter').value;
+    const currentAdd = document.getElementById('add-category').value;
+    document.getElementById('cat-filter').innerHTML = `<option value="">All Categories</option>${cats.map(cat => `<option value="${escHtml(cat)}">${escHtml(cat)}</option>`).join('')}`;
+    document.getElementById('add-category').innerHTML = `${cats.map(cat => `<option value="${escHtml(cat)}">${escHtml(cat)}</option>`).join('')}<option value="Other">Other</option>`;
+    if (cats.includes(currentFilter)) document.getElementById('cat-filter').value = currentFilter;
+    if (cats.includes(currentAdd)) document.getElementById('add-category').value = currentAdd;
+  }
+
+  async function apiGet(url) {
+    const res = await fetch(url, { headers: { 'X-Auth-Token': token } });
+    if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+    return res.json();
+  }
+
+  async function apiPost(url, body) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-Auth-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+    return { ok: res.ok, status: res.status, data: await res.json() };
+  }
+
+  async function apiPatch(url, body) {
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'X-Auth-Token': token, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+    return { ok: res.ok, data: await res.json() };
+  }
+
+  async function apiDelete(url) {
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: { 'X-Auth-Token': token }
+    });
+    if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+    return res.ok;
+  }
+
+  function currentFilters() {
+    return {
+      q: document.getElementById('search-box').value.trim(),
+      category: document.getElementById('cat-filter').value,
+      status: document.getElementById('status-filter').value,
+      sort: document.getElementById('sort-by').value,
+      tab: activeTab,
+    };
+  }
+
+  function buildJobsUrl(page = 1) {
+    const params = new URLSearchParams();
+    const f = currentFilters();
+    if (f.q) params.set('q', f.q);
+    if (f.category) params.set('category', f.category);
+    if (f.status) params.set('status', f.status);
+    if (f.sort) params.set('sort', f.sort);
+    if (f.tab) params.set('tab', f.tab);
+    params.set('page', String(page));
+    params.set('page_size', String(pageSize));
+    return `/api/jobs?${params.toString()}`;
+  }
+
+  function showLoadingSkeleton() {
+    const list = document.getElementById('jobs-list');
+    document.getElementById('jobs-loading').classList.add('hidden');
+    document.getElementById('jobs-empty').classList.add('hidden');
+    list.classList.remove('hidden');
+    list.innerHTML = Array.from({ length: 6 }).map(() => `
+      <div class="bg-white rounded-xl border border-gray-200 p-4 sm:p-5 shadow-sm">
+        <div class="h-4 w-24 skeleton rounded mb-3"></div>
+        <div class="h-5 w-56 skeleton rounded mb-2"></div>
+        <div class="h-4 w-40 skeleton rounded mb-4"></div>
+        <div class="h-3 w-full skeleton rounded mb-2"></div>
+        <div class="h-3 w-4/5 skeleton rounded"></div>
+      </div>
+    `).join('');
+  }
+
+  async function loadJobs(reset = false) {
+    if (loading) return;
+    loading = true;
+    if (reset) {
+      currentPage = 1;
+      allJobs = [];
+      document.getElementById('load-more-wrap').classList.add('hidden');
+      showLoadingSkeleton();
+    }
+    try {
+      const data = await apiGet(buildJobsUrl(currentPage));
+      jobsMeta = data.meta || jobsMeta;
+      populateCategoryOptions();
+      totalFiltered = data.total_filtered || 0;
+      hasMore = !!data.has_more;
+      const incoming = data.jobs || [];
+      allJobs = reset ? incoming : allJobs.concat(incoming);
+      renderJobs();
+      updateStats();
+    } catch (e) {
+      console.error('Failed to load jobs:', e);
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function loadMoreJobs() {
+    if (!hasMore || loading) return;
+    currentPage += 1;
+    const btn = document.getElementById('load-more-btn');
+    const old = btn.textContent;
+    btn.textContent = 'Loading…';
+    btn.disabled = true;
+    await loadJobs(false);
+    btn.textContent = old;
+    btn.disabled = false;
+  }
+
+  function renderJobs() {
+    const list = document.getElementById('jobs-list');
+    const empty = document.getElementById('jobs-empty');
+    const counter = document.getElementById('result-count');
+    const loadMoreWrap = document.getElementById('load-more-wrap');
+
+    counter.textContent = `${allJobs.length} shown · ${totalFiltered} matched`;
+
+    if (allJobs.length === 0) {
+      list.innerHTML = '';
+      empty.classList.remove('hidden');
+      loadMoreWrap.classList.add('hidden');
+      return;
+    }
+
+    empty.classList.add('hidden');
+    list.innerHTML = allJobs.map(job => jobCardHTML(job)).join('');
+    loadMoreWrap.classList.toggle('hidden', !hasMore);
+  }
+
+  function statusLabel(s) {
+    return { not_applied: 'Not Applied', applied: 'Applied', interview: 'Interview', offer: 'Offer 🎉', rejected: 'Rejected', expired: 'Expired', saved: 'Saved', not_interested: 'Not Interested', withdrawn: 'Withdrawn' }[s] || s;
+  }
+
+  function jobCardHTML(job) {
+    const deadlineHtml = job.deadline ? `<span class="text-xs text-red-500 font-medium">Due ${job.deadline}</span>` : '';
+    const salaryHtml = job.salary_range ? `<span class="text-xs text-gray-400">${escHtml(job.salary_range)}</span>` : '';
+    const dateAdded = job.date_added ? `<span class="text-xs text-gray-400">Added ${job.date_added}</span>` : '';
+    const dateApplied = job.date_applied ? `<span class="text-xs text-gray-400">Applied ${job.date_applied}</span>` : '';
+    const notes = job.notes_preview || job.notes || '';
+    return `
+      <div class="job-card bg-white rounded-xl border border-gray-200 p-4 sm:p-5 shadow-sm" id="card-${job.id}">
+        <div class="flex flex-col sm:flex-row sm:items-start gap-3">
+          <div class="flex-1 min-w-0">
+            <div class="flex flex-wrap items-center gap-1.5 mb-1.5">
+              <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">${escHtml(job.category)}</span>
+              <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${getResumeColor(job._bestResume || getResumeTag(job.category))}">📄 ${job._bestResume || getResumeTag(job.category)}</span>
+              ${job._firmLabel ? `<span class="text-xs font-semibold px-2 py-0.5 rounded-full ${getFirmLabelColor(job._firmLabel)}">${job._firmLabel}</span>` : ''}
+              ${job._matchScore ? `<span class="text-xs font-bold px-2 py-0.5 rounded-full ${job._chance === 'High Chance' ? 'bg-green-100 text-green-700' : job._chance === 'Strong Fit' ? 'bg-blue-100 text-blue-700' : job._chance === 'Reach' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-600'}">${job._chance}: ${job._matchScore}</span>` : ''}
+              <span class="priority-${job.priority} text-xs text-gray-500 flex items-center">${job.priority}</span>
+            </div>
+            <h3 class="font-semibold text-gray-900 text-sm sm:text-base truncate">${escHtml(job.company)}</h3>
+            <p class="text-gray-500 text-sm truncate">${escHtml(job.role)}</p>
+            ${job._matchReasons && job._matchReasons.length ? `<p class="text-[11px] text-gray-400 mt-1 truncate">Why: ${escHtml(job._matchReasons.join(' · '))}</p>` : ''}
+            <div class="flex flex-wrap items-center gap-2 mt-1.5">
+              <span class="text-xs text-gray-400">📍 ${escHtml(job.location || '')}</span>
+              ${salaryHtml}
+              ${dateAdded}
+              ${deadlineHtml}
+              ${dateApplied}
+            </div>
+          </div>
+
+          <div class="flex flex-col gap-2 sm:items-end sm:min-w-[200px]">
+            <div class="flex items-center gap-2">
+              <span class="status-badge-${job.id} text-xs font-semibold px-2.5 py-1 rounded-full status-${job.status}">${statusLabel(job.status)}</span>
+              <select onchange="updateStatus('${job.id}', this.value)" class="rounded-lg border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:border-gray-900 bg-white">
+                <option value="not_applied" ${job.status==='not_applied'?'selected':''}>Not Applied</option>
+                <option value="applied" ${job.status==='applied'?'selected':''}>Applied</option>
+                <option value="interview" ${job.status==='interview'?'selected':''}>Interview</option>
+                <option value="offer" ${job.status==='offer'?'selected':''}>Offer</option>
+                <option value="rejected" ${job.status==='rejected'?'selected':''}>Rejected</option>
+                <option value="expired" ${job.status==='expired'?'selected':''}>Expired</option>
+                <option value="saved" ${job.status==='saved'?'selected':''}>Saved</option>
+                <option value="not_interested" ${job.status==='not_interested'?'selected':''}>Not Interested</option>
+                <option value="withdrawn" ${job.status==='withdrawn'?'selected':''}>Withdrawn</option>
+              </select>
+            </div>
+            ${job.url ? `<a href="${getApplyUrl(job)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 bg-gray-900 hover:bg-gray-800 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-all">Apply <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>` : ''}
+            ${(job.careers_url || job.url) ? `<a href="${escHtml(job.careers_url || job.url)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-gray-400 hover:text-gray-600 text-xs font-medium px-2 py-1.5 rounded-lg transition-all border border-gray-200 hover:border-gray-300">Careers Page</a>` : ''}
+            <button onclick="deleteJob('${job.id}')" class="text-xs text-gray-300 hover:text-red-400 transition-colors">Remove</button>
+          </div>
+        </div>
+
+        <div class="mt-3 pt-3 border-t border-gray-100">
+          <button onclick="toggleRequirements('${job.id}')" class="flex items-center gap-1 text-xs font-medium text-gray-400 hover:text-gray-700 transition-colors group">
+            <svg id="req-icon-${job.id}" class="w-3.5 h-3.5 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            Details
+          </button>
+          <div id="req-${job.id}" class="hidden mt-2 p-3 bg-gray-50 rounded-lg border border-gray-100">
+            ${notes ? `<p class="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">${escHtml(notes)}</p>` : '<p class="text-xs text-gray-400">Tap to load full details.</p>'}
+          </div>
+        </div>
+
+        <div class="mt-2">
+          <textarea placeholder="Add notes…" class="notes-input w-full text-xs text-gray-600 rounded-lg border border-transparent hover:border-gray-200 focus:border-gray-300 px-2 py-1.5 focus:outline-none bg-gray-50 focus:bg-white transition-all" onblur="updateNotes('${job.id}', this.value)">${escHtml(job.notes || '')}</textarea>
+        </div>
+      </div>`;
+  }
+
+  function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  async function toggleRequirements(id) {
+    const box = document.getElementById(`req-${id}`);
+    const icon = document.getElementById(`req-icon-${id}`);
+    if (!box) return;
+    const isHidden = box.classList.contains('hidden');
+    box.classList.toggle('hidden');
+    if (icon) icon.style.transform = isHidden ? 'rotate(180deg)' : '';
+    if (isHidden && !detailCache[id]) {
+      box.innerHTML = '<div class="h-3 w-24 skeleton rounded mb-2"></div><div class="h-3 w-full skeleton rounded mb-2"></div><div class="h-3 w-5/6 skeleton rounded"></div>';
+      try {
+        const job = await apiGet(`/api/jobs?id=${encodeURIComponent(id)}`);
+        detailCache[id] = job;
+        const parts = [];
+        if (job.description) parts.push(`<div class="mb-3"><div class="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Description</div><p class="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">${escHtml(job.description)}</p></div>`);
+        if (job.notes) parts.push(`<div><div class="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1">Notes</div><p class="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">${escHtml(job.notes)}</p></div>`);
+        box.innerHTML = parts.join('') || '<p class="text-xs text-gray-400">No extra details.</p>';
+      } catch (e) {
+        box.innerHTML = '<p class="text-xs text-red-400">Could not load details.</p>';
+      }
+    }
+  }
+
+  function updateStats() {
+    const total = jobsMeta.active || 0;
+    const applied = jobsMeta.counts?.applied || 0;
+    const interviews = jobsMeta.counts?.interview || 0;
+    const offers = jobsMeta.counts?.offer || 0;
+    ['stat-total','stat-total-m'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = total; });
+    ['stat-applied','stat-applied-m'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = applied; });
+    ['stat-interviews','stat-interviews-m'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = interviews; });
+    ['stat-offers','stat-offers-m'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = offers; });
+  }
+
+  function setTab(t) {
+    activeTab = t;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById(`tab-${t}`).classList.add('active');
+    loadJobs(true);
+  }
+
+  function getApplyUrl(job) {
+    const url = job.url || '';
+    const directPatterns = ['lever.co/', 'greenhouse.io/', 'ashbyhq.com/', 'workable.com/', 'myworkdayjobs.com/', 'taleo.net/', 'icims.com/', 'smartrecruiters.com/', 'applytojob.com/', 'bamboohr.com/', 'jobvite.com/', 'ultipro.com/', 'job-boards.greenhouse.io/', 'jobs.lever.co/', 'boards.greenhouse.io/', 'linkedin.com/jobs/view/'];
+    const isDirect = directPatterns.some(p => url.includes(p));
+    const alwaysGeneric = ['/jobs/search', '/search-results', '/search?', '/search/?', 'linkedin.com/company/', 'linkedin.com/jobs/search'];
+    const isForceGeneric = alwaysGeneric.some(p => url.includes(p));
+    if (isDirect && !isForceGeneric) return url;
+    const company = encodeURIComponent(job.company.replace(/\s*\(.*?\)\s*/g, '').trim());
+    const role = encodeURIComponent(job.role.replace(/\s*\(.*?\)\s*/g, '').trim());
+    return `https://ca.indeed.com/jobs?q=${company}+${role}&l=Toronto%2C+ON`;
+  }
+
+  async function updateStatus(id, newStatus) {
+    const job = allJobs.find(j => j.id === id);
+    if (!job) return;
+    const oldStatus = job.status;
+    job.status = newStatus;
+    if (newStatus === 'applied' && !job.date_applied) job.date_applied = new Date().toISOString().split('T')[0];
+    const badge = document.querySelector(`.status-badge-${id}`);
+    if (badge) {
+      badge.className = `status-badge-${id} text-xs font-semibold px-2.5 py-1 rounded-full status-${newStatus}`;
+      badge.textContent = statusLabel(newStatus);
+    }
+    updateStats();
+    try {
+      await apiPatch(`/api/jobs?id=${id}`, { status: newStatus, date_applied: job.date_applied });
+    } catch (e) {
+      job.status = oldStatus;
+      renderJobs();
+    }
+  }
+
+  const notesTimer = {};
+  async function updateNotes(id, notes) {
+    const job = allJobs.find(j => j.id === id);
+    if (!job || job.notes === notes) return;
+    job.notes = notes;
+    clearTimeout(notesTimer[id]);
+    notesTimer[id] = setTimeout(async () => {
+      try { await apiPatch(`/api/jobs?id=${id}`, { notes }); } catch (e) {}
+    }, 700);
+  }
+
+  async function deleteJob(id) {
+    if (!confirm('Remove this job listing?')) return;
+    allJobs = allJobs.filter(j => j.id !== id);
+    renderJobs();
+    try {
+      await apiDelete(`/api/jobs?id=${id}`);
+      loadJobs(true);
+    } catch (e) {
+      await loadJobs(true);
+    }
+  }
+
+  function openAddModal() {
+    document.getElementById('add-modal').classList.remove('hidden');
+    document.getElementById('add-company').focus();
+  }
+
+  function closeAddModal() {
+    document.getElementById('add-modal').classList.add('hidden');
+    clearAddForm();
+  }
+
+  function clearAddForm() {
+    ['add-company','add-role','add-url','add-salary','add-notes','add-deadline'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('add-location').value = 'Toronto';
+    document.getElementById('add-tier').value = '4';
+    document.getElementById('add-priority').value = 'medium';
+    document.getElementById('add-error').classList.add('hidden');
+  }
+
+  async function submitAddJob() {
+    const company = document.getElementById('add-company').value.trim();
+    const role = document.getElementById('add-role').value.trim();
+    const err = document.getElementById('add-error');
+    if (!company || !role) {
+      err.textContent = 'Company and Role are required.';
+      err.classList.remove('hidden');
+      return;
+    }
+    const btn = document.getElementById('add-submit-btn');
+    btn.textContent = 'Saving…';
+    btn.disabled = true;
+    const body = {
+      company, role,
+      tier: parseInt(document.getElementById('add-tier').value),
+      category: document.getElementById('add-category').value,
+      url: document.getElementById('add-url').value.trim(),
+      salary_range: document.getElementById('add-salary').value.trim(),
+      location: document.getElementById('add-location').value.trim() || 'Toronto',
+      priority: document.getElementById('add-priority').value,
+      notes: document.getElementById('add-notes').value.trim(),
+      deadline: document.getElementById('add-deadline').value || null
+    };
+    try {
+      const { ok, data } = await apiPost('/api/jobs', body);
+      if (ok) {
+        closeAddModal();
+        await loadJobs(true);
+      } else {
+        err.textContent = data.error || 'Failed to add job.';
+        err.classList.remove('hidden');
+      }
+    } catch (e) {
+      err.textContent = 'Network error. Try again.';
+      err.classList.remove('hidden');
+    }
+    btn.textContent = 'Add Job';
+    btn.disabled = false;
+  }
+
+  function scheduleReload() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => loadJobs(true), 250);
+  }
+
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeAddModal();
+    if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      document.getElementById('search-box').focus();
+    }
+  });
+
+  document.getElementById('search-box').addEventListener('input', scheduleReload);
+  document.getElementById('cat-filter').addEventListener('change', () => loadJobs(true));
+  document.getElementById('status-filter').addEventListener('change', () => loadJobs(true));
+  document.getElementById('sort-by').addEventListener('change', () => loadJobs(true));
+  document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+  if (token) showApp();
+</script>
+</body>
+</html>
+ (e.key === 'Enter') doLogin(); });
+
+  if (token) showApp();
+</script>
+</body>
+</html>
+owApp();
+</script>
+</body>
+</html>
+ (e.key === 'Enter') doLogin(); });
+
+  if (token) showApp();
+</script>
+</body>
+</html>
