@@ -6,14 +6,19 @@ Job search dashboard for Ratul Sarker.
 - Vercel-deployed lightweight dashboard
 - Python API (`api/jobs.py`)
 - Static frontend (`public/index.html`)
-- Job data stored in a separate GitHub Gist backend
+- Job data stored in a Neon Postgres database
 
 ## Live
 - Production: `https://jobs.ratulsarker.com`
 
 ## Data backend
-- GitHub Gist stores `jobs.json`
-- App reads/writes the gist rather than using a traditional database
+- Neon Postgres (project `job-tracker`); single `jobs` table
+- Connection via `DATABASE_URL` env var (pooled endpoint on Vercel)
+- Indexed: btree on status/category/date_added, pg_trgm GIN on a generated
+  `search_blob` column for fast substring search
+- Reads load all rows then filter/score in Python (curated tabs); writes are
+  atomic single-row INSERT/UPDATE/DELETE (no read-modify-write race)
+- Migrated off the legacy GitHub Gist on 2026-06-13
 
 ## Local structure
 - `api/jobs.py` — API + filtering + gist sync logic

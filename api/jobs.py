@@ -1,18 +1,78 @@
 import json
 import os
+import ssl
 import uuid
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime
-import urllib.request
+from datetime import datetime, date
+
+import pg8000.dbapi
 
 # Auth
 PASSWORD = "ratul2026"
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
-GIST_ID = os.environ.get("GIST_ID", "27de5ee2ebb56bd5be8a31102df7bb9c")
-GIST_FILE = "jobs.json"
-
 VALID_TOKEN = "jt-" + PASSWORD
+
+# Database (Neon Postgres). DATABASE_URL = postgresql://user:pass@host/db?sslmode=require
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+_conn = None
+
+# Columns owned by the app (search_blob is a generated column, never written directly).
+JOB_COLUMNS = [
+    "id", "company", "role", "tier", "category", "url", "careers_url",
+    "salary_range", "location", "status", "notes", "description", "source",
+    "date_added", "date_applied", "priority", "deadline",
+]
+DATE_FIELDS = {"date_added", "date_applied", "deadline"}
+
+
+def _parse_dsn(url):
+    p = urlparse(url)
+    return dict(
+        user=p.username,
+        password=p.password,
+        host=p.hostname,
+        port=p.port or 5432,
+        database=(p.path or "/").lstrip("/") or "neondb",
+    )
+
+
+def get_conn():
+    """Cached connection, revalidated per request (Neon pooled endpoint)."""
+    global _conn
+    if _conn is not None:
+        try:
+            c = _conn.cursor()
+            c.execute("SELECT 1")
+            c.close()
+            return _conn
+        except Exception:
+            try:
+                _conn.close()
+            except Exception:
+                pass
+            _conn = None
+    ctx = ssl.create_default_context()
+    _conn = pg8000.dbapi.connect(ssl_context=ctx, **_parse_dsn(DATABASE_URL))
+    _conn.autocommit = True
+    return _conn
+
+
+def _iso(v):
+    if isinstance(v, (date, datetime)):
+        return v.isoformat()[:10]
+    return v
+
+
+def _date_or_none(v):
+    v = v.strip() if isinstance(v, str) else v
+    return v if v else None
+
+
+def row_to_job(row):
+    job = {}
+    for k, v in zip(JOB_COLUMNS, row):
+        job[k] = _iso(v) if k in DATE_FIELDS else v
+    return job
 ARCHIVE_STATUSES = {"expired", "not_interested", "rejected", "withdrawn"}
 AUTO_KEYWORDS = [
     'automation', 'zapier', 'airtable', 'no-code', 'nocode', 'integration', 'crm', 'api',
@@ -63,34 +123,23 @@ TOP_TIER_FIRMS = [
 P_MAP = {"high": 0, "medium": 1, "low": 2}
 
 
-def gist_read():
-    url = f"https://api.github.com/gists/{GIST_ID}"
-    req = urllib.request.Request(url, headers={
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json",
-        "User-Agent": "job-tracker"
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-            file_info = data["files"][GIST_FILE]
-            raw_url = file_info.get("raw_url")
-            if raw_url:
-                raw_req = urllib.request.Request(raw_url, headers={"User-Agent": "job-tracker"})
-                with urllib.request.urlopen(raw_req, timeout=15) as raw_resp:
-                    content = raw_resp.read().decode()
-            else:
-                content = file_info["content"]
-            parsed = json.loads(content)
-            if isinstance(parsed, list):
-                return {"jobs": parsed}
-            elif isinstance(parsed, dict) and "jobs" in parsed:
-                return parsed
-            else:
-                return {"jobs": []}
-    except Exception as e:
-        print(f"Gist read error: {e}")
-        return {"jobs": []}
+_SELECT = "SELECT " + ", ".join(JOB_COLUMNS) + " FROM jobs"
+
+
+def load_all_jobs():
+    cur = get_conn().cursor()
+    cur.execute(_SELECT)
+    rows = cur.fetchall()
+    cur.close()
+    return {"jobs": [row_to_job(r) for r in rows]}
+
+
+def get_job(job_id):
+    cur = get_conn().cursor()
+    cur.execute(_SELECT + " WHERE id = %s", (job_id,))
+    row = cur.fetchone()
+    cur.close()
+    return row_to_job(row) if row else None
 
 
 def build_meta(jobs):
@@ -112,33 +161,38 @@ def build_meta(jobs):
     }
 
 
-def gist_write(data):
-    if isinstance(data, dict) and "jobs" in data:
-        write_data = data["jobs"]
-    elif isinstance(data, list):
-        write_data = data
-    else:
-        write_data = []
-    url = f"https://api.github.com/gists/{GIST_ID}"
-    payload = json.dumps({
-        "files": {
-            GIST_FILE: {
-                "content": json.dumps(write_data, indent=2)
-            }
-        }
-    }).encode()
-    req = urllib.request.Request(url, data=payload, method="PATCH", headers={
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json",
-        "Content-Type": "application/json",
-        "User-Agent": "job-tracker"
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.status == 200
-    except Exception as e:
-        print(f"Gist write error: {e}")
-        return False
+def insert_job(job):
+    cols = [c for c in JOB_COLUMNS]
+    vals = [_date_or_none(job.get(c)) if c in DATE_FIELDS else job.get(c) for c in cols]
+    sql = (
+        "INSERT INTO jobs (" + ", ".join(cols) + ") VALUES ("
+        + ", ".join(["%s"] * len(cols)) + ")"
+    )
+    cur = get_conn().cursor()
+    cur.execute(sql, vals)
+    cur.close()
+
+
+def update_job(job_id, fields):
+    if not fields:
+        return
+    sets, vals = [], []
+    for k, v in fields.items():
+        sets.append(f"{k} = %s")
+        vals.append(_date_or_none(v) if k in DATE_FIELDS else v)
+    sets.append("updated_at = now()")
+    vals.append(job_id)
+    cur = get_conn().cursor()
+    cur.execute("UPDATE jobs SET " + ", ".join(sets) + " WHERE id = %s", vals)
+    cur.close()
+
+
+def delete_job(job_id):
+    cur = get_conn().cursor()
+    cur.execute("DELETE FROM jobs WHERE id = %s", (job_id,))
+    rowcount = cur.rowcount
+    cur.close()
+    return rowcount > 0
 
 
 def cors_headers():
@@ -424,14 +478,17 @@ class handler(BaseHTTPRequestHandler):
             return self.send_json(401, {'error': 'Invalid password'})
 
         if path == '/api/jobs':
-            data = gist_read()
-            jobs = data.get('jobs', [])
             job_id = qs.get('id', [''])[0]
-            if job_id:
-                job = next((j for j in jobs if j.get('id') == job_id), None)
-                if not job:
-                    return self.send_json(404, {'error': 'Job not found'})
-                return self.send_json(200, job)
+            try:
+                if job_id:
+                    job = get_job(job_id)
+                    if not job:
+                        return self.send_json(404, {'error': 'Job not found'})
+                    return self.send_json(200, job)
+                jobs = load_all_jobs().get('jobs', [])
+            except Exception as e:
+                print(f"DB read error: {e}")
+                return self.send_json(500, {'error': 'Database error'})
 
             filtered = apply_filters(jobs, qs)
             total_filtered = len(filtered)
@@ -469,29 +526,35 @@ class handler(BaseHTTPRequestHandler):
             return self.send_json(401, {'error': 'Unauthorized'})
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length).decode())
-        data = gist_read()
-        jobs = data.get('jobs', [])
+        try:
+            tier = int(body.get('tier', 4))
+        except Exception:
+            tier = 4
         new_job = {
             'id': str(uuid.uuid4()),
             'company': body.get('company', ''),
             'role': body.get('role', ''),
-            'tier': int(body.get('tier', 4)),
+            'tier': tier,
             'category': body.get('category', 'Business Operations'),
             'url': body.get('url', ''),
+            'careers_url': body.get('careers_url', ''),
             'salary_range': body.get('salary_range', ''),
             'location': body.get('location', 'Toronto'),
             'status': body.get('status', 'not_applied'),
             'notes': body.get('notes', ''),
+            'description': body.get('description', ''),
+            'source': body.get('source', 'manual'),
             'date_added': datetime.now().strftime('%Y-%m-%d'),
             'date_applied': body.get('date_applied', None),
             'priority': body.get('priority', 'medium'),
-            'deadline': body.get('deadline', None)
+            'deadline': body.get('deadline', None),
         }
-        jobs.append(new_job)
-        data['jobs'] = jobs
-        if gist_write(data):
-            return self.send_json(201, new_job)
-        return self.send_json(500, {'error': 'Failed to save'})
+        try:
+            insert_job(new_job)
+        except Exception as e:
+            print(f"DB insert error: {e}")
+            return self.send_json(500, {'error': 'Failed to save'})
+        return self.send_json(201, new_job)
 
     def do_PATCH(self):
         parsed = urlparse(self.path)
@@ -506,25 +569,22 @@ class handler(BaseHTTPRequestHandler):
             return self.send_json(400, {'error': 'Missing id'})
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length).decode())
-        data = gist_read()
-        jobs = data.get('jobs', [])
-        updated = None
-        for job in jobs:
-            if job['id'] == job_id:
-                allowed = ['status', 'notes', 'date_applied', 'priority', 'deadline', 'company', 'role', 'tier', 'category', 'url', 'salary_range', 'location']
-                for field in allowed:
-                    if field in body:
-                        job[field] = body[field]
-                if body.get('status') == 'applied' and not job.get('date_applied'):
-                    job['date_applied'] = datetime.now().strftime('%Y-%m-%d')
-                updated = job
-                break
-        if not updated:
-            return self.send_json(404, {'error': 'Job not found'})
-        data['jobs'] = jobs
-        if gist_write(data):
-            return self.send_json(200, updated)
-        return self.send_json(500, {'error': 'Failed to save'})
+        allowed = ['status', 'notes', 'date_applied', 'priority', 'deadline', 'company',
+                   'role', 'tier', 'category', 'url', 'careers_url', 'salary_range',
+                   'location', 'description', 'source']
+        fields = {f: body[f] for f in allowed if f in body}
+        try:
+            existing = get_job(job_id)
+            if not existing:
+                return self.send_json(404, {'error': 'Job not found'})
+            if body.get('status') == 'applied' and not existing.get('date_applied') and not fields.get('date_applied'):
+                fields['date_applied'] = datetime.now().strftime('%Y-%m-%d')
+            update_job(job_id, fields)
+            updated = get_job(job_id)
+        except Exception as e:
+            print(f"DB update error: {e}")
+            return self.send_json(500, {'error': 'Failed to save'})
+        return self.send_json(200, updated)
 
     def do_DELETE(self):
         parsed = urlparse(self.path)
@@ -537,13 +597,10 @@ class handler(BaseHTTPRequestHandler):
         job_id = qs.get('id', [''])[0]
         if not job_id:
             return self.send_json(400, {'error': 'Missing id'})
-        data = gist_read()
-        jobs = data.get('jobs', [])
-        original_len = len(jobs)
-        jobs = [j for j in jobs if j['id'] != job_id]
-        if len(jobs) == original_len:
-            return self.send_json(404, {'error': 'Job not found'})
-        data['jobs'] = jobs
-        if gist_write(data):
-            return self.send_json(200, {'ok': True})
-        return self.send_json(500, {'error': 'Failed to save'})
+        try:
+            if not delete_job(job_id):
+                return self.send_json(404, {'error': 'Job not found'})
+        except Exception as e:
+            print(f"DB delete error: {e}")
+            return self.send_json(500, {'error': 'Failed to save'})
+        return self.send_json(200, {'ok': True})
