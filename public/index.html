@@ -109,6 +109,7 @@
     <!-- Tabs -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 flex gap-0 -mb-px overflow-x-auto">
       <div class="tab-btn active" onclick="setTab('all')" id="tab-all">All</div>
+      <div class="tab-btn" onclick="setTab('search')" id="tab-search">🔎 Search</div>
       <div class="tab-btn" onclick="setTab('automation')" id="tab-automation">⚡ Automation</div>
       <div class="tab-btn" onclick="setTab('bestmatch')" id="tab-bestmatch">🎯 Best Match</div>
       <div class="tab-btn" onclick="setTab('earlycareers')" id="tab-earlycareers">🌱 Early Careers</div>
@@ -121,7 +122,7 @@
   </header>
 
   <!-- Filters bar -->
-  <div class="bg-white border-b border-gray-100 sticky top-[104px] sm:top-[88px] z-20">
+  <div id="filters-bar" class="bg-white border-b border-gray-100 sticky top-[104px] sm:top-[88px] z-20">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap gap-2 items-center">
       <div class="relative flex-1 min-w-[160px] max-w-xs">
         <svg class="absolute left-3 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
@@ -164,6 +165,33 @@
         <option value="company">Sort: Company</option>
       </select>
       <div id="result-count" class="text-xs text-gray-400 ml-auto"></div>
+    </div>
+  </div>
+
+  <!-- Advanced search panel (Search tab only) -->
+  <div id="search-panel" class="hidden bg-white border-b border-gray-100 sticky top-[104px] sm:top-[88px] z-20">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 space-y-3">
+      <div class="flex flex-wrap gap-2 items-center">
+        <div class="relative flex-1 min-w-[220px]">
+          <svg class="absolute left-3 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <input type="text" id="db-search" placeholder="Search all fields — company, role, notes, description, location…"
+            class="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-gray-900">
+        </div>
+        <div class="relative flex-1 min-w-[200px]">
+          <span class="absolute left-3 top-2 text-red-400 text-sm font-bold">−</span>
+          <input type="text" id="db-exclude" placeholder="Exclude terms (comma-separated)…"
+            class="w-full pl-8 pr-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-red-400">
+        </div>
+        <button onclick="clearDbFilters()" class="text-xs font-semibold text-gray-500 hover:text-red-500 border border-gray-200 hover:border-red-300 rounded-lg px-3 py-2 transition-all">Clear all</button>
+      </div>
+      <div>
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">Categories <span class="text-gray-300 normal-case font-normal">(click to include · none = all)</span></div>
+        <div id="db-cat-chips" class="flex flex-wrap gap-1.5"></div>
+      </div>
+      <div>
+        <div class="text-[11px] font-semibold uppercase tracking-wide text-gray-400 mb-1.5">Status</div>
+        <div id="db-status-chips" class="flex flex-wrap gap-1.5"></div>
+      </div>
     </div>
   </div>
 
@@ -287,6 +315,19 @@
   const detailCache = {};
   let searchTimer = null;
   let categoryList = [];
+  // Search tab (database view) state
+  const dbCats = new Set();
+  const dbStatuses = new Set();
+  const dbSort = { field: 'date_added', dir: 'desc' };
+  const DB_COLUMNS = [
+    { key: 'company', label: 'Company' },
+    { key: 'role', label: 'Role' },
+    { key: 'category', label: 'Category' },
+    { key: 'status', label: 'Status' },
+    { key: 'location', label: 'Location' },
+    { key: 'priority', label: 'Priority' },
+    { key: 'date_added', label: 'Added' },
+  ];
 
   const RESUME_MAP = {
     'Private Equity': 'PE', 'private_equity': 'PE',
@@ -377,6 +418,7 @@
     document.getElementById('add-category').innerHTML = `${cats.map(cat => `<option value="${escHtml(cat)}">${escHtml(cat)}</option>`).join('')}<option value="Other">Other</option>`;
     if (cats.includes(currentFilter)) document.getElementById('cat-filter').value = currentFilter;
     if (cats.includes(currentAdd)) document.getElementById('add-category').value = currentAdd;
+    if (activeTab === 'search') renderDbChips();
   }
 
   async function apiGet(url) {
@@ -426,12 +468,24 @@
 
   function buildJobsUrl(page = 1) {
     const params = new URLSearchParams();
-    const f = currentFilters();
-    if (f.q) params.set('q', f.q);
-    if (f.category) params.set('category', f.category);
-    if (f.status) params.set('status', f.status);
-    if (f.sort) params.set('sort', f.sort);
-    if (f.tab) params.set('tab', f.tab);
+    if (activeTab === 'search') {
+      const q = document.getElementById('db-search').value.trim();
+      const exclude = document.getElementById('db-exclude').value.trim();
+      if (q) { params.set('q', q); params.set('qmode', 'full'); }
+      if (exclude) params.set('exclude', exclude);
+      if (dbCats.size) params.set('categories', [...dbCats].join(','));
+      if (dbStatuses.size) params.set('statuses', [...dbStatuses].join(','));
+      params.set('sort', dbSort.field);
+      params.set('dir', dbSort.dir);
+      params.set('tab', 'search');
+    } else {
+      const f = currentFilters();
+      if (f.q) params.set('q', f.q);
+      if (f.category) params.set('category', f.category);
+      if (f.status) params.set('status', f.status);
+      if (f.sort) params.set('sort', f.sort);
+      if (f.tab) params.set('tab', f.tab);
+    }
     params.set('page', String(page));
     params.set('page_size', String(pageSize));
     return `/api/jobs?${params.toString()}`;
@@ -507,8 +561,86 @@
     }
 
     empty.classList.add('hidden');
-    list.innerHTML = allJobs.map(job => jobCardHTML(job)).join('');
+    list.innerHTML = activeTab === 'search'
+      ? tableHTML(allJobs)
+      : allJobs.map(job => jobCardHTML(job)).join('');
     loadMoreWrap.classList.toggle('hidden', !hasMore);
+  }
+
+  function sortArrow(key) {
+    if (dbSort.field !== key) return '<span class="text-gray-300">↕</span>';
+    return dbSort.dir === 'asc' ? '▲' : '▼';
+  }
+
+  function tableHTML(jobs) {
+    const head = DB_COLUMNS.map(c =>
+      `<th onclick="setDbSort('${c.key}')" class="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-gray-500 cursor-pointer hover:text-gray-900 whitespace-nowrap select-none">${c.label} ${sortArrow(c.key)}</th>`
+    ).join('') + '<th class="px-3 py-2"></th>';
+    const rows = jobs.map(j => {
+      const apply = j.url ? `<a href="${getApplyUrl(j)}" target="_blank" rel="noopener" class="text-blue-600 hover:underline text-xs font-semibold whitespace-nowrap">Apply ↗</a>` : '';
+      return `<tr class="border-t border-gray-100 hover:bg-gray-50">
+        <td class="px-3 py-2 text-sm font-medium text-gray-900 whitespace-nowrap">${escHtml(j.company)}</td>
+        <td class="px-3 py-2 text-sm text-gray-600 max-w-[280px] truncate" title="${escHtml(j.role)}">${escHtml(j.role)}</td>
+        <td class="px-3 py-2 text-xs"><span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 whitespace-nowrap">${escHtml(j.category)}</span></td>
+        <td class="px-3 py-2 text-xs"><span class="px-2 py-0.5 rounded-full status-${j.status} whitespace-nowrap">${statusLabel(j.status)}</span></td>
+        <td class="px-3 py-2 text-xs text-gray-500 whitespace-nowrap">${escHtml(j.location || '')}</td>
+        <td class="px-3 py-2 text-xs"><span class="priority-${j.priority} text-gray-500">${escHtml(j.priority || '')}</span></td>
+        <td class="px-3 py-2 text-xs text-gray-400 whitespace-nowrap">${escHtml(j.date_added || '')}</td>
+        <td class="px-3 py-2 text-right">${apply}</td>
+      </tr>`;
+    }).join('');
+    return `<div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
+      <table class="w-full border-collapse"><thead class="bg-gray-50 sticky top-0"><tr>${head}</tr></thead><tbody>${rows}</tbody></table>
+    </div>`;
+  }
+
+  function setDbSort(field) {
+    if (dbSort.field === field) {
+      dbSort.dir = dbSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+      dbSort.field = field;
+      dbSort.dir = ['date_added', 'date_applied', 'deadline'].includes(field) ? 'desc' : 'asc';
+    }
+    loadJobs(true);
+  }
+
+  function chipHtml(kind, value, label, active) {
+    const cls = active
+      ? 'bg-gray-900 text-white border-gray-900'
+      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400';
+    return `<button onclick="toggleChip('${kind}', this.dataset.val)" data-val="${escHtml(value)}" class="text-xs px-2.5 py-1 rounded-full border transition-all ${cls}">${escHtml(label)}</button>`;
+  }
+
+  function renderDbChips() {
+    const catBox = document.getElementById('db-cat-chips');
+    const statusBox = document.getElementById('db-status-chips');
+    if (catBox) {
+      const cats = jobsMeta.categories || {};
+      const keys = Object.keys(cats);
+      catBox.innerHTML = keys.length
+        ? keys.map(c => chipHtml('cat', c, `${c} (${cats[c]})`, dbCats.has(c))).join('')
+        : '<span class="text-xs text-gray-300">No categories yet</span>';
+    }
+    if (statusBox) {
+      const statuses = ['not_applied', 'applied', 'interview', 'offer', 'rejected', 'expired', 'saved', 'not_interested', 'withdrawn'];
+      statusBox.innerHTML = statuses.map(s => chipHtml('status', s, statusLabel(s), dbStatuses.has(s))).join('');
+    }
+  }
+
+  function toggleChip(kind, val) {
+    const set = kind === 'cat' ? dbCats : dbStatuses;
+    if (set.has(val)) set.delete(val); else set.add(val);
+    renderDbChips();
+    loadJobs(true);
+  }
+
+  function clearDbFilters() {
+    dbCats.clear();
+    dbStatuses.clear();
+    document.getElementById('db-search').value = '';
+    document.getElementById('db-exclude').value = '';
+    renderDbChips();
+    loadJobs(true);
   }
 
   function statusLabel(s) {
@@ -623,6 +755,10 @@
     activeTab = t;
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById(`tab-${t}`).classList.add('active');
+    const isSearch = t === 'search';
+    document.getElementById('filters-bar').classList.toggle('hidden', isSearch);
+    document.getElementById('search-panel').classList.toggle('hidden', !isSearch);
+    if (isSearch) renderDbChips();
     loadJobs(true);
   }
 
@@ -753,26 +889,12 @@
   });
 
   document.getElementById('search-box').addEventListener('input', scheduleReload);
+  document.getElementById('db-search').addEventListener('input', scheduleReload);
+  document.getElementById('db-exclude').addEventListener('input', scheduleReload);
   document.getElementById('cat-filter').addEventListener('change', () => loadJobs(true));
   document.getElementById('status-filter').addEventListener('change', () => loadJobs(true));
   document.getElementById('sort-by').addEventListener('change', () => loadJobs(true));
   document.getElementById('login-password').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-
-  if (token) showApp();
-</script>
-</body>
-</html>
- (e.key === 'Enter') doLogin(); });
-
-  if (token) showApp();
-</script>
-</body>
-</html>
-owApp();
-</script>
-</body>
-</html>
- (e.key === 'Enter') doLogin(); });
 
   if (token) showApp();
 </script>

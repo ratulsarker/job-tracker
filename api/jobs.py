@@ -285,15 +285,30 @@ def apply_filters(jobs, qs):
     q = qs.get('q', [''])[0].strip().lower()
     tab = qs.get('tab', ['all'])[0]
     sort = qs.get('sort', ['date_added'])[0]
+    sort_dir = qs.get('dir', [''])[0]
+    qmode = qs.get('qmode', ['basic'])[0]
+    exclude_terms = [t.strip().lower() for t in qs.get('exclude', [''])[0].split(',') if t.strip()]
+    categories = [c for c in qs.get('categories', [''])[0].split(',') if c]
+    statuses = [s for s in qs.get('statuses', [''])[0].split(',') if s]
 
     filtered = []
     for job in jobs:
         text = text_blob(job)
-        if status_filter and job.get('status') != status_filter:
+        if statuses:
+            if job.get('status') not in statuses:
+                continue
+        elif status_filter and job.get('status') != status_filter:
             continue
-        if category and job.get('category') != category:
+        if categories:
+            if job.get('category') not in categories:
+                continue
+        elif category and job.get('category') != category:
             continue
-        if q and q not in (f"{job.get('company', '')} {job.get('role', '')}".lower()):
+        if q:
+            haystack = text if qmode == 'full' else f"{job.get('company', '')} {job.get('role', '')}".lower()
+            if q not in haystack:
+                continue
+        if exclude_terms and any(term in text for term in exclude_terms):
             continue
         if tab == 'automation' and not any(kw in text for kw in AUTO_KEYWORDS):
             continue
@@ -330,7 +345,21 @@ def apply_filters(jobs, qs):
             job['_matchReasons'] = match['reasons']
         filtered.append(job)
 
-    if sort == 'priority':
+    SORT_KEYS = {
+        'company': lambda j: (j.get('company') or '').lower(),
+        'role': lambda j: (j.get('role') or '').lower(),
+        'category': lambda j: (j.get('category') or '').lower(),
+        'status': lambda j: (j.get('status') or '').lower(),
+        'location': lambda j: (j.get('location') or '').lower(),
+        'priority': lambda j: P_MAP.get(j.get('priority', 'medium'), 1),
+        'date_added': lambda j: j.get('date_added') or '',
+        'date_applied': lambda j: j.get('date_applied') or '',
+        'deadline': lambda j: j.get('deadline') or '',
+    }
+    if tab == 'search' and sort in SORT_KEYS:
+        reverse = (sort_dir == 'desc') if sort_dir else (sort in ('date_added', 'date_applied', 'deadline'))
+        filtered.sort(key=SORT_KEYS[sort], reverse=reverse)
+    elif sort == 'priority':
         filtered.sort(key=lambda j: (P_MAP.get(j.get('priority', 'medium'), 1), -(j.get('_matchScore') or 0)))
     elif sort == 'company':
         filtered.sort(key=lambda j: j.get('company', '').lower())
@@ -343,7 +372,8 @@ def apply_filters(jobs, qs):
         firm_rank = {'Boutique': 0, 'Finance Firm': 1, 'Other': 2, 'Large Firm': 3, 'Institutional': 4, 'Top Tier': 5}
         filtered.sort(key=lambda j: (firm_rank.get(j.get('_firmLabel'), 9), P_MAP.get(j.get('priority', 'medium'), 1), j.get('company', '').lower()))
     else:
-        filtered.sort(key=lambda j: j.get('date_added', ''), reverse=True)
+        reverse = (sort_dir != 'asc')
+        filtered.sort(key=lambda j: j.get('date_added') or '', reverse=reverse)
     return filtered
 
 
