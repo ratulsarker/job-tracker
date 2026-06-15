@@ -281,6 +281,8 @@ def score_match(job):
     negatives_hard = ['10+ year', '8+ year', '7+ year', '6+ year', '5-8 years', '5 to 8 years', 'director', 'vice president', 'vp ', 'principal', 'partner', 'cpa required', 'isda', 'csa', 'trioptima', 'numerix', 'markit', 'aladdin']
     negatives_medium = ['4+ year', '4 years', '5+ year', '5 years', 'senior manager', 'senior ', 'lead ', 'manager', 'derivatives middle office', 'quant developer', 'insurance product forms']
     context_bonus = ['entry level', 'new grad', 'new graduate', 'early career', 'analyst', 'associate', 'coordinator', 'specialist', 'toronto', 'waterloo', 'remote', 'hybrid', 'canada', 'startup', 'saas', 'fintech']
+    interview_odds_bonus = ['airtable', 'zapier', 'clay', 'greenhouse', 'business systems', 'technical solutions', 'implementation', 'enablement', 'customer success', 'crm', 'revops', 'revenue operations', 'sales operations', 'workflow', 'api', 'webhook', 'dashboard', 'reporting']
+    interview_odds_penalty = ['staffing', 'recruiter', 'recruiting', 'contract', '12 month contract', '6 month contract', 'senior analyst', 'associate director', 'capital markets', 'investment banking', 'trading', 'quant', 'supervisory analyst']
     best_resume = 'General'
     best_score = -999
     reasons = []
@@ -298,15 +300,27 @@ def score_match(job):
         for kw in context_bonus:
             if kw in text:
                 score += 1
+        for kw in interview_odds_bonus:
+            if kw in text:
+                score += 2
         for kw in negatives_hard:
             if kw in text:
                 score -= 8
         for kw in negatives_medium:
             if kw in text:
                 score -= 4
+        for kw in interview_odds_penalty:
+            if kw in text:
+                score -= 3
         if ((('asset management' in text) or ('private equity' in text) or ('equity research' in text) or ('portfolio' in text))
                 and resume != 'PE' and not (('new grad' in text) or ('entry level' in text) or ('intern' in text))):
             score -= 3
+        if any(k in text for k in ['startup', 'saas', 'fintech', 'healthtech', 'software', 'scale-up', 'scaleup', 'mid-sized', 'mid sized', 'small company', 'growing company']):
+            score += 3
+        if 'toronto' in text:
+            score += 2
+        if any(k in text for k in ['posted today', 'posted 1 hour', 'posted 2 hours', 'posted 3 hours', 'posted 4 hours', 'posted 5 hours', 'posted 6 hours', 'posted 7 hours', 'posted 8 hours', 'posted 9 hours', 'posted 10 hours', 'posted 11 hours', 'posted 12 hours', 'posted 13 hours', 'posted 14 hours', 'posted 15 hours', 'posted 16 hours', 'posted 17 hours', 'posted 18 hours', 'posted 19 hours', 'posted 20 hours', 'posted 21 hours', 'posted 22 hours', 'posted 23 hours', 'posted within 24h', 'fresh linkedin posting']):
+            score += 2
         status = job.get('status')
         if status == 'not_applied':
             score += 2
