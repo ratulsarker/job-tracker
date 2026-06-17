@@ -270,8 +270,8 @@ def score_match(job):
             "titleBoost": ['analyst', 'analytics', 'data'],
         },
         "PE": {
-            "keywords": ['investment analyst', 'portfolio analytics', 'institutional investing', 'manager research', 'asset allocation', 'equity research', 'valuation', 'capital markets', 'cfa', 'investment consulting', 'wealth', 'pension'],
-            "titleBoost": ['analyst', 'associate', 'investment'],
+            "keywords": ['investment analyst', 'portfolio analytics', 'institutional investing', 'manager research', 'asset allocation', 'equity research', 'valuation', 'capital markets', 'cfa', 'investment consulting', 'wealth', 'pension', 'transaction advisory', 'corporate finance', 'underwriting', 'due diligence', 'acquisition', 'portfolio company', 'private markets', 'private capital', 'm&a', 'deals'],
+            "titleBoost": ['analyst', 'associate', 'investment', 'financial analyst'],
         },
         "Consulting": {
             "keywords": ['consulting', 'strategy', 'business operations', 'project management', 'stakeholder', 'process improvement', 'cross-functional', 'operations analyst'],
@@ -281,8 +281,8 @@ def score_match(job):
     negatives_hard = ['10+ year', '8+ year', '7+ year', '6+ year', '5-8 years', '5 to 8 years', 'director', 'vice president', 'vp ', 'principal', 'partner', 'cpa required', 'isda', 'csa', 'trioptima', 'numerix', 'markit', 'aladdin']
     negatives_medium = ['4+ year', '4 years', '5+ year', '5 years', 'senior manager', 'senior ', 'lead ', 'manager', 'derivatives middle office', 'quant developer', 'insurance product forms']
     context_bonus = ['entry level', 'new grad', 'new graduate', 'early career', 'analyst', 'associate', 'coordinator', 'specialist', 'toronto', 'waterloo', 'remote', 'hybrid', 'canada', 'startup', 'saas', 'fintech']
-    interview_odds_bonus = ['airtable', 'zapier', 'clay', 'greenhouse', 'business systems', 'technical solutions', 'implementation', 'enablement', 'customer success', 'crm', 'revops', 'revenue operations', 'sales operations', 'workflow', 'api', 'webhook', 'dashboard', 'reporting']
-    interview_odds_penalty = ['staffing', 'recruiter', 'recruiting', 'contract', '12 month contract', '6 month contract', 'senior analyst', 'associate director', 'capital markets', 'investment banking', 'trading', 'quant', 'supervisory analyst']
+    interview_odds_bonus = ['airtable', 'zapier', 'clay', 'greenhouse', 'business systems', 'technical solutions', 'implementation', 'enablement', 'customer success', 'crm', 'revops', 'revenue operations', 'sales operations', 'workflow', 'api', 'webhook', 'dashboard', 'reporting', 'due diligence', 'underwriting', 'acquisition', 'screening', 'valuation', 'portfolio company', 'corporate finance', 'transaction advisory', 'deals', 'm&a', 'wealth management', 'asset management', 'private markets', 'private capital']
+    interview_odds_penalty = ['staffing', 'recruiter', 'recruiting', 'contract', '12 month contract', '6 month contract', 'senior analyst', 'associate director', 'trading', 'quant', 'supervisory analyst']
     best_resume = 'General'
     best_score = -999
     reasons = []
@@ -315,7 +315,7 @@ def score_match(job):
         if ((('asset management' in text) or ('private equity' in text) or ('equity research' in text) or ('portfolio' in text))
                 and resume != 'PE' and not (('new grad' in text) or ('entry level' in text) or ('intern' in text))):
             score -= 3
-        if any(k in text for k in ['startup', 'saas', 'fintech', 'healthtech', 'software', 'scale-up', 'scaleup', 'mid-sized', 'mid sized', 'small company', 'growing company']):
+        if any(k in text for k in ['startup', 'saas', 'fintech', 'healthtech', 'software', 'scale-up', 'scaleup', 'mid-sized', 'mid sized', 'small company', 'growing company', 'boutique', 'independent firm', 'wealth management firm', 'asset management firm', 'advisory firm', 'holding company', 'family office']):
             score += 3
         if 'toronto' in text:
             score += 2
