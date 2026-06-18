@@ -9,9 +9,8 @@ from datetime import datetime, date
 
 import pg8000.dbapi
 
-# Auth — password comes from the APP_PASSWORD env var (never hardcoded).
-# If it is unset, auth fails closed: no login and no token is ever valid.
-PASSWORD = os.environ.get("APP_PASSWORD", "")
+# Auth — prefer APP_PASSWORD from env, but fall back to Ratul's chosen code.
+PASSWORD = os.environ.get("APP_PASSWORD", "ratul2026")
 VALID_TOKEN = ("jt-" + hashlib.sha256(("v1:" + PASSWORD).encode()).hexdigest()[:40]) if PASSWORD else ""
 
 # Database (Neon Postgres). DATABASE_URL = postgresql://user:pass@host/db?sslmode=require
