@@ -6,5 +6,8 @@
   "routes": [
     { "src": "/api/(.*)", "dest": "/api/jobs.py" },
     { "src": "/(.*)", "dest": "/public/$1" }
+  ],
+  "crons": [
+    { "path": "/api/cron", "schedule": "0 11 * * *" }
   ]
 }

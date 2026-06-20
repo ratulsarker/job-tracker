@@ -1,7 +1,12 @@
+import csv
 import hashlib
+import io
 import json
 import os
+import re
 import ssl
+import urllib.parse
+import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -143,7 +148,16 @@ def get_job(job_id):
     return row_to_job(row) if row else None
 
 
+def is_rahat_job(job):
+    """Rahat's auto-found Canada jobs are tagged source='rahat-*'. This is the
+    partition key that keeps his board separate from Ratul's tabs — no schema
+    change needed."""
+    return (job.get("source") or "").startswith("rahat")
+
+
 def build_meta(jobs):
+    # Meta drives Ratul's stat pills + category dropdown — exclude Rahat's jobs.
+    jobs = [j for j in jobs if not is_rahat_job(j)]
     counts = {}
     categories = {}
     for job in jobs:
@@ -360,9 +374,20 @@ def apply_filters(jobs, qs):
     categories = [c for c in qs.get('categories', [''])[0].split(',') if c]
     statuses = [s for s in qs.get('statuses', [''])[0].split(',') if s]
 
+    # Multi-term search: every whitespace-separated token must match (AND).
+    q_terms = [t for t in q.split() if t]
+
     filtered = []
     for job in jobs:
         text = text_blob(job)
+        rahat = is_rahat_job(job)
+        # Partition: the 'rahat' tab shows only Rahat's jobs; every other tab
+        # (incl. 'all', 'search', 'bestmatch') excludes them.
+        if tab == 'rahat':
+            if not rahat:
+                continue
+        elif rahat:
+            continue
         if statuses:
             if job.get('status') not in statuses:
                 continue
@@ -373,9 +398,14 @@ def apply_filters(jobs, qs):
                 continue
         elif category and job.get('category') != category:
             continue
-        if q:
-            haystack = text if qmode == 'full' else f"{job.get('company', '')} {job.get('role', '')}".lower()
-            if q not in haystack:
+        if q_terms:
+            # Quick search (curated tabs) spans company/role/category/location;
+            # the Search tab's full mode spans the whole blob (notes/desc too).
+            haystack = text if qmode == 'full' else (
+                f"{job.get('company', '')} {job.get('role', '')} "
+                f"{job.get('category', '')} {job.get('location', '')}"
+            ).lower()
+            if not all(term in haystack for term in q_terms):
                 continue
         if exclude_terms and any(term in text for term in exclude_terms):
             continue
@@ -458,6 +488,259 @@ def summarize_job(job):
     return out
 
 
+# ===========================================================================
+# Rahat (Canada software/tech) auto-ingest — a daily Vercel cron hits /api/cron.
+# Jobs are inserted with source='rahat-*' so they live only in the Rahat tab.
+# Profile: Mohammad Rahat Hasan — Java/SQL/JavaScript/Angular/Power Platform/
+# SSIS/AI-LLM; junior–mid (~2 yrs, technical-delivery consultant). Targets CA.
+# Source: Adzuna CA (free key, optional) primary + Remotive keyless fallback.
+# ===========================================================================
+RAHAT_QUERIES = [
+    "software developer",
+    "java developer",
+    "full stack developer",
+    "power platform developer",
+    "technical consultant",
+    "data analyst",
+]
+RAHAT_SKILLS = [
+    'java', 'sql', 'mysql', 'sql server', 'javascript', 'typescript', 'angular',
+    'react', 'html', 'css', 'python', 'power platform', 'powerapps', 'power apps',
+    'power automate', 'power bi', 'ssis', 'rest api', 'api', 'integration',
+    'automation', 'full stack', 'fullstack', 'full-stack', 'software engineer',
+    'software developer', 'developer', 'data analyst', 'business analyst',
+    'technical consultant', 'low-code', 'low code', 'agile', 'scrum', 'sdlc',
+    'llm', 'ai', 'machine learning', 'application developer', 'web developer',
+    'frontend', 'backend', 'front-end', 'back-end', '.net', 'c#',
+]
+RAHAT_NEG = [
+    'senior ', 'staff ', 'principal', 'lead ', 'manager', 'director', 'head of',
+    'vice president', 'vp ', 'architect', '5+ year', '6+ year', '7+ year',
+    '8+ year', '10+ year', 'security clearance', 'secret clearance', 'phd',
+]
+RAHAT_MAX_INSERT = 25  # bound per-run work so the serverless function stays well under timeout
+
+
+def _http_json(url, timeout=6, headers=None):
+    req = urllib.request.Request(url, headers=headers or {"User-Agent": "job-tracker-cron/1.0"})
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read().decode("utf-8", "replace"))
+
+
+def _norm_url(u):
+    return (u or "").split("?")[0].rstrip("/").lower()
+
+
+def rahat_match(role, body):
+    text = (str(role) + " " + str(body)).lower()
+    hits = []
+    for s in RAHAT_SKILLS:
+        # Word-boundary match (non-alphanumeric edges) so 'ssis' doesn't match
+        # 'assistant', 'api' doesn't match 'capital', 'ai' doesn't match 'available'.
+        if re.search(r"(?<![a-z0-9])" + re.escape(s) + r"(?![a-z0-9])", text):
+            hits.append(s)
+    neg = any(n in text for n in RAHAT_NEG)
+    return sorted(set(hits)), neg
+
+
+def _adzuna_salary(r):
+    lo, hi = r.get("salary_min"), r.get("salary_max")
+    if lo and hi:
+        return f"${int(lo):,}–${int(hi):,}"
+    return None
+
+
+def fetch_adzuna_ca():
+    app_id = os.environ.get("ADZUNA_APP_ID", "")
+    app_key = os.environ.get("ADZUNA_APP_KEY", "")
+    if not (app_id and app_key):
+        return []
+    out = []
+    for what in RAHAT_QUERIES:
+        params = urllib.parse.urlencode({
+            "app_id": app_id, "app_key": app_key, "what": what,
+            "results_per_page": 20, "max_days_old": 7, "sort_by": "date",
+            "content-type": "application/json",
+        })
+        url = f"https://api.adzuna.com/v1/api/jobs/ca/search/1?{params}"
+        try:
+            data = _http_json(url)
+        except Exception as e:
+            print(f"adzuna fetch error ({what}): {e}")
+            continue
+        for r in data.get("results", []):
+            out.append({
+                "company": (r.get("company") or {}).get("display_name") or "Unknown",
+                "role": r.get("title") or "",
+                "url": r.get("redirect_url") or "",
+                "location": (r.get("location") or {}).get("display_name") or "Canada",
+                "salary_range": _adzuna_salary(r),
+                "description": r.get("description") or "",
+                "source": "rahat-adzuna",
+            })
+    return out
+
+
+def _strip_html(s):
+    s = re.sub(r"<[^>]+>", " ", s or "")
+    s = s.replace("&amp;", "&").replace("&nbsp;", " ").replace("&#39;", "'")
+    return re.sub(r"\s+", " ", s).strip()
+
+
+# Remote-eligible location tokens a Canada-based applicant can take.
+_CA_OK = ["worldwide", "anywhere", "canada", "north america", "americas", "usa, canada", "usa/canada"]
+
+
+def fetch_remotive_ca():
+    """Keyless fallback — Remotive remote jobs filtered to Canada-eligible
+    locations (Canada / North America / Worldwide). Better location metadata
+    than Jobicy, which buckets by region and returns ~nothing for Canada."""
+    out = []
+    endpoints = [
+        "https://remotive.com/api/remote-jobs?category=software-dev&limit=100",
+        "https://remotive.com/api/remote-jobs?search=data+analyst&limit=50",
+    ]
+    for url in endpoints:
+        try:
+            data = _http_json(url, timeout=8)
+        except Exception as e:
+            print(f"remotive fetch error: {e}")
+            continue
+        for r in data.get("jobs", []):
+            loc = (r.get("candidate_required_location") or "").lower()
+            if not any(tok in loc for tok in _CA_OK):
+                continue
+            out.append({
+                "company": r.get("company_name") or "Unknown",
+                "role": r.get("title") or "",
+                "url": r.get("url") or "",
+                "location": (r.get("candidate_required_location") or "Remote") + " · Remote",
+                "salary_range": (r.get("salary") or "").strip() or None,
+                "description": _strip_html(r.get("description"))[:800],
+                "source": "rahat-remotive",
+            })
+    return out
+
+
+def ingest_rahat():
+    existing = load_all_jobs().get("jobs", [])
+    seen_urls, seen_pairs = set(), set()
+    for j in existing:
+        if is_rahat_job(j):
+            if j.get("url"):
+                seen_urls.add(_norm_url(j["url"]))
+            seen_pairs.add(((j.get("company") or "").lower().strip(),
+                            (j.get("role") or "").lower().strip()))
+
+    candidates = []
+    for fetch in (fetch_adzuna_ca, fetch_remotive_ca):
+        try:
+            candidates += fetch()
+        except Exception as e:
+            print(f"rahat fetch error ({fetch.__name__}): {e}")
+
+    added, dup, unfit = 0, 0, 0
+    today = datetime.now().strftime("%Y-%m-%d")
+    for c in candidates:
+        if added >= RAHAT_MAX_INSERT:
+            break
+        company, role = (c.get("company") or "").strip(), (c.get("role") or "").strip()
+        if not company or not role:
+            continue
+        nu = _norm_url(c.get("url"))
+        pair = (company.lower(), role.lower())
+        if (nu and nu in seen_urls) or pair in seen_pairs:
+            dup += 1
+            continue
+        hits, neg = rahat_match(role, c.get("description", ""))
+        if neg or not hits:
+            unfit += 1
+            continue
+        seen_urls.add(nu)
+        seen_pairs.add(pair)
+        priority = "high" if len(hits) >= 4 else ("medium" if len(hits) >= 2 else "low")
+        src = (c.get("source") or "rahat-auto").replace("rahat-", "")
+        job = {
+            "id": str(uuid.uuid4()),
+            "company": company,
+            "role": role,
+            "tier": 4,
+            "category": "Software / Tech",
+            "url": c.get("url") or "",
+            "careers_url": "",
+            "salary_range": c.get("salary_range"),
+            "location": c.get("location") or "Canada",
+            "status": "not_applied",
+            "notes": f"Auto-found for Rahat via {src}. Skills matched: {', '.join(hits[:8])}.",
+            "description": (c.get("description") or "")[:1500],
+            "source": c.get("source") or "rahat-auto",
+            "date_added": today,
+            "date_applied": None,
+            "priority": priority,
+            "deadline": None,
+        }
+        try:
+            insert_job(job)
+            added += 1
+        except Exception as e:
+            print(f"rahat insert error: {e}")
+    return {"added": added, "skipped_duplicate": dup, "skipped_unfit": unfit,
+            "candidates": len(candidates)}
+
+
+# --- Export (CSV / Excel) -- reflects the exact filtered set, no pagination ---
+EXPORT_COLUMNS = [
+    ("company", "Company"), ("role", "Role"), ("category", "Category"),
+    ("status", "Status"), ("priority", "Priority"), ("location", "Location"),
+    ("salary_range", "Salary"), ("url", "URL"), ("date_added", "Date Added"),
+    ("date_applied", "Date Applied"), ("deadline", "Deadline"),
+    ("source", "Source"), ("notes", "Notes"),
+]
+
+
+def _cell(v):
+    return "" if v is None else str(v)
+
+
+def export_csv(jobs):
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([label for _, label in EXPORT_COLUMNS])
+    for j in jobs:
+        w.writerow([_cell(j.get(k)) for k, _ in EXPORT_COLUMNS])
+    # Prepend UTF-8 BOM so Excel opens accented text + columns cleanly.
+    return ("﻿" + buf.getvalue()).encode("utf-8")
+
+
+def export_xlsx(jobs):
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Jobs"
+    headers = [label for _, label in EXPORT_COLUMNS]
+    ws.append(headers)
+    fill = PatternFill("solid", fgColor="111827")
+    font = Font(bold=True, color="FFFFFF")
+    for ci in range(1, len(headers) + 1):
+        c = ws.cell(row=1, column=ci)
+        c.fill, c.font = fill, font
+        c.alignment = Alignment(vertical="center")
+    for j in jobs:
+        ws.append([_cell(j.get(k)) for k, _ in EXPORT_COLUMNS])
+    widths = [22, 40, 18, 13, 10, 24, 16, 42, 12, 12, 12, 14, 60]
+    for i, wd in enumerate(widths, 1):
+        ws.column_dimensions[get_column_letter(i)].width = wd
+    ws.freeze_panes = "A2"
+    if ws.max_row >= 1:
+        ws.auto_filter.ref = ws.dimensions
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
 class handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
@@ -470,6 +753,18 @@ class handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def send_bytes(self, status, data, content_type, filename):
+        self.send_response(status)
+        for k, v in cors_headers().items():
+            if k == 'Content-Type':
+                continue
+            self.send_header(k, v)
+        self.send_header('Content-Type', content_type)
+        self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+        self.send_header('Content-Length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def check_auth(self):
         token = self.headers.get('X-Auth-Token', '')
@@ -491,6 +786,45 @@ class handler(BaseHTTPRequestHandler):
             if PASSWORD and pw == PASSWORD:
                 return self.send_json(200, {'token': VALID_TOKEN, 'ok': True})
             return self.send_json(401, {'error': 'Invalid password'})
+
+        if path == '/api/cron':
+            # Vercel attaches `Authorization: Bearer $CRON_SECRET` if the env var
+            # is set. If set, require it (also accept ?key= for manual triggers);
+            # if unset, run open so it works before you configure the secret.
+            secret = os.environ.get('CRON_SECRET', '')
+            if secret:
+                auth = self.headers.get('Authorization', '')
+                if auth != f'Bearer {secret}' and qs.get('key', [''])[0] != secret:
+                    return self.send_json(401, {'error': 'Unauthorized'})
+            try:
+                result = ingest_rahat()
+            except Exception as e:
+                print(f"cron error: {e}")
+                return self.send_json(500, {'error': 'cron failed'})
+            return self.send_json(200, {'ok': True, **result})
+
+        if path == '/api/export':
+            try:
+                jobs = load_all_jobs().get('jobs', [])
+            except Exception as e:
+                print(f"DB read error: {e}")
+                return self.send_json(500, {'error': 'Database error'})
+            filtered = apply_filters(jobs, qs)
+            fmt = qs.get('format', ['csv'])[0].lower()
+            tab = qs.get('tab', ['all'])[0]
+            stamp = datetime.now().strftime('%Y%m%d')
+            if fmt in ('xlsx', 'excel'):
+                try:
+                    data = export_xlsx(filtered)
+                    return self.send_bytes(
+                        200, data,
+                        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                        f'jobs_{tab}_{stamp}.xlsx')
+                except Exception as e:
+                    print(f"xlsx export error (falling back to csv): {e}")
+            data = export_csv(filtered)
+            return self.send_bytes(200, data, 'text/csv; charset=utf-8',
+                                   f'jobs_{tab}_{stamp}.csv')
 
         if path == '/api/jobs':
             job_id = qs.get('id', [''])[0]

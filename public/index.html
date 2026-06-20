@@ -90,6 +90,17 @@
             <span id="stat-offers">0</span> offers
           </div>
         </div>
+        <div class="relative">
+          <button onclick="toggleExportMenu(event)" class="border border-gray-200 hover:border-gray-300 text-gray-700 text-sm font-semibold px-3 py-2 rounded-lg transition-all flex items-center gap-1.5">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            <span class="hidden sm:inline">Export</span>
+          </button>
+          <div id="export-menu" class="hidden absolute right-0 mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-50 overflow-hidden">
+            <button onclick="exportJobs('xlsx')" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">⬇&nbsp; Excel (.xlsx)</button>
+            <button onclick="exportJobs('csv')" class="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">⬇&nbsp; CSV</button>
+            <div class="px-3 py-1.5 text-[11px] text-gray-400 border-t border-gray-100">Exports the current filter/tab</div>
+          </div>
+        </div>
         <button onclick="openAddModal()" class="bg-gray-900 hover:bg-gray-800 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           <span class="hidden sm:inline">Add Job</span>
@@ -117,6 +128,7 @@
       <div class="tab-btn" onclick="setTab('micromature')" id="tab-micromature">🧬 Micro Mature</div>
       <div class="tab-btn" onclick="setTab('applied')" id="tab-applied">Applied</div>
       <div class="tab-btn" onclick="setTab('interviews')" id="tab-interviews">Interviews</div>
+      <div class="tab-btn" onclick="setTab('rahat')" id="tab-rahat" style="margin-left:0.75rem;border-left:1px solid #e5e7eb;padding-left:0.9rem;">👤 Rahat · CA</div>
     </div>
   </header>
 
@@ -466,6 +478,15 @@
   }
 
   function buildJobsUrl(page = 1) {
+    const params = currentFilterParams();
+    params.set('page', String(page));
+    params.set('page_size', String(pageSize));
+    return `/api/jobs?${params.toString()}`;
+  }
+
+  // Same filter/tab params as buildJobsUrl, minus pagination — so an export
+  // matches exactly what's on screen (e.g. search "bmo" → only BMO rows).
+  function currentFilterParams() {
     const params = new URLSearchParams();
     if (activeTab === 'search') {
       const q = document.getElementById('db-search').value.trim();
@@ -485,9 +506,21 @@
       if (f.sort) params.set('sort', f.sort);
       if (f.tab) params.set('tab', f.tab);
     }
-    params.set('page', String(page));
-    params.set('page_size', String(pageSize));
-    return `/api/jobs?${params.toString()}`;
+    return params;
+  }
+
+  function toggleExportMenu(e) {
+    e.stopPropagation();
+    document.getElementById('export-menu').classList.toggle('hidden');
+  }
+
+  function exportJobs(format) {
+    document.getElementById('export-menu').classList.add('hidden');
+    if (totalFiltered === 0) { alert('No jobs to export with the current filters.'); return; }
+    const params = currentFilterParams();
+    params.set('format', format);
+    // Content-Disposition: attachment triggers a download without navigating.
+    window.location.href = `/api/export?${params.toString()}`;
   }
 
   function showLoadingSkeleton() {
@@ -763,7 +796,7 @@
 
   function getApplyUrl(job) {
     const url = job.url || '';
-    const directPatterns = ['lever.co/', 'greenhouse.io/', 'ashbyhq.com/', 'workable.com/', 'myworkdayjobs.com/', 'taleo.net/', 'icims.com/', 'smartrecruiters.com/', 'applytojob.com/', 'bamboohr.com/', 'jobvite.com/', 'ultipro.com/', 'job-boards.greenhouse.io/', 'jobs.lever.co/', 'boards.greenhouse.io/', 'linkedin.com/jobs/view/'];
+    const directPatterns = ['lever.co/', 'greenhouse.io/', 'ashbyhq.com/', 'workable.com/', 'myworkdayjobs.com/', 'taleo.net/', 'icims.com/', 'smartrecruiters.com/', 'applytojob.com/', 'bamboohr.com/', 'jobvite.com/', 'ultipro.com/', 'job-boards.greenhouse.io/', 'jobs.lever.co/', 'boards.greenhouse.io/', 'linkedin.com/jobs/view/', 'adzuna.', 'remotive.com/', 'remoteok.com/'];
     const isDirect = directPatterns.some(p => url.includes(p));
     const alwaysGeneric = ['/jobs/search', '/search-results', '/search?', '/search/?', 'linkedin.com/company/', 'linkedin.com/jobs/search'];
     const isForceGeneric = alwaysGeneric.some(p => url.includes(p));
@@ -880,12 +913,15 @@
   }
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeAddModal();
+    if (e.key === 'Escape') { closeAddModal(); document.getElementById('export-menu')?.classList.add('hidden'); }
     if (e.key === 'k' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       document.getElementById('search-box').focus();
     }
   });
+
+  // Close the export dropdown on any outside click.
+  document.addEventListener('click', () => document.getElementById('export-menu')?.classList.add('hidden'));
 
   document.getElementById('search-box').addEventListener('input', scheduleReload);
   document.getElementById('db-search').addEventListener('input', scheduleReload);
