@@ -537,8 +537,6 @@ class handler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip('/')
         if path != '/api/jobs':
             return self.send_json(404, {'error': 'Not found'})
-        if not self.check_auth():
-            return self.send_json(401, {'error': 'Unauthorized'})
         length = int(self.headers.get('Content-Length', 0))
         body = json.loads(self.rfile.read(length).decode())
         try:
@@ -577,8 +575,6 @@ class handler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip('/')
         if path != '/api/jobs':
             return self.send_json(404, {'error': 'Not found'})
-        if not self.check_auth():
-            return self.send_json(401, {'error': 'Unauthorized'})
         job_id = qs.get('id', [''])[0]
         if not job_id:
             return self.send_json(400, {'error': 'Missing id'})
@@ -607,8 +603,6 @@ class handler(BaseHTTPRequestHandler):
         path = parsed.path.rstrip('/')
         if path != '/api/jobs':
             return self.send_json(404, {'error': 'Not found'})
-        if not self.check_auth():
-            return self.send_json(401, {'error': 'Unauthorized'})
         job_id = qs.get('id', [''])[0]
         if not job_id:
             return self.send_json(400, {'error': 'Missing id'})
